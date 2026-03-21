@@ -9,6 +9,14 @@ export interface ActiveUser {
   logonTime: string
 }
 
+export interface LocalUser {
+  id: string
+  deviceId: string
+  name: string
+  fullName: string
+  enabled: boolean
+}
+
 export interface Device {
   id: string
   name: string
@@ -24,9 +32,11 @@ export interface Device {
 
 interface DevicesState {
   devices: Device[]
+  localUsers: Record<string, LocalUser[]>
   isLoading: boolean
   error: string | null
   fetchDevices: () => Promise<void>
+  fetchLocalUsers: (deviceId: string) => Promise<void>
   sendCommand: (deviceId: string, type: string, delaySeconds?: number) => Promise<{ delivered: boolean }>
   bindDevice: (deviceId: string, secret: string, name: string) => Promise<void>
   deleteDevice: (deviceId: string) => Promise<void>
@@ -34,6 +44,7 @@ interface DevicesState {
 
 export const useDevicesStore = create<DevicesState>((set) => ({
   devices: [],
+  localUsers: {},
   isLoading: false,
   error: null,
 
@@ -44,6 +55,15 @@ export const useDevicesStore = create<DevicesState>((set) => ({
       set({ devices: data, isLoading: false })
     } catch {
       set({ error: 'Не удалось загрузить устройства', isLoading: false })
+    }
+  },
+
+  fetchLocalUsers: async (deviceId) => {
+    try {
+      const { data } = await api.get<LocalUser[]>(`/devices/${deviceId}/users`)
+      set((s) => ({ localUsers: { ...s.localUsers, [deviceId]: data } }))
+    } catch {
+      // Тихая ошибка — список просто останется пустым
     }
   },
 
