@@ -8,7 +8,8 @@ export const WS_EVENTS = {
     // Сервер → Агент
     SERVER_COMMAND: 'server:command',
     SERVER_SCHEDULE_UPDATE: 'server:schedule:update',
-    SERVER_UNBIND: 'server:unbind',       // устройство удалено пользователем
+    SERVER_BONUS_UPDATE: 'server:bonus:update',   // добавлено бонусное время
+    SERVER_UNBIND: 'server:unbind',               // устройство удалено пользователем
   
     // Агент → Сервер (bind flow)
     AGENT_BIND_REQUEST: 'agent:bind:request',
