@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   View,
   Text,
@@ -8,12 +8,13 @@ import {
   Modal,
   TextInput,
   ScrollView,
+  Image,
 } from 'react-native'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { useDevicesStore } from '../store/devices'
-import type { ActiveUser, LocalUser } from '../store/devices'
+import type { ActiveUser, LocalUser, DiskInfo } from '../store/devices'
 import { api } from '../api/client'
 import type { RootStackParams } from '../navigation'
 
@@ -86,9 +87,24 @@ function CommandButton({ label, emoji, color, onPress }: CommandButtonProps) {
   )
 }
 
+function DiskRow({ disk }: { disk: DiskInfo }) {
+  const usedPct = disk.total > 0 ? Math.round((disk.used / disk.total) * 100) : 0
+  const freeGb = (disk.free / 1073741824).toFixed(1)
+  const totalGb = (disk.total / 1073741824).toFixed(1)
+  return (
+    <View style={styles.diskRow}>
+      <Text style={styles.diskMount}>{disk.mount}</Text>
+      <View style={styles.diskBarBg}>
+        <View style={[styles.diskBarFill, { width: `${usedPct}%`, backgroundColor: usedPct > 85 ? '#ef4444' : '#6c63ff' }]} />
+      </View>
+      <Text style={styles.diskText}>{freeGb} / {totalGb} GB</Text>
+    </View>
+  )
+}
+
 export default function ControlScreen({ route }: Props) {
   const { deviceId, deviceName } = route.params
-  const { sendCommand, devices, localUsers, fetchLocalUsers } = useDevicesStore()
+  const { sendCommand, devices, localUsers, fetchLocalUsers, fetchScreenshot } = useDevicesStore()
   const navigation = useNavigation<Nav>()
   const device = devices.find((d) => d.id === deviceId)
   const deviceLocalUsers = localUsers[deviceId] ?? []
@@ -100,6 +116,42 @@ export default function ControlScreen({ route }: Props) {
   const [delayModal, setDelayModal] = useState(false)
   const [pendingCommand, setPendingCommand] = useState<string | null>(null)
   const [delaySeconds, setDelaySeconds] = useState('0')
+  const [screenshotModal, setScreenshotModal] = useState(false)
+  const [screenshotData, setScreenshotData] = useState<string | null>(null)
+  const [screenshotLoading, setScreenshotLoading] = useState(false)
+  const screenshotPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const takeScreenshot = async () => {
+    setScreenshotLoading(true)
+    setScreenshotData(null)
+    setScreenshotModal(true)
+    // Запоминаем время до команды, чтобы принять только свежий скриншот
+    const before = new Date().toISOString()
+    try {
+      await sendCommand(deviceId, 'SCREENSHOT', 0)
+    } catch {
+      setScreenshotLoading(false)
+      return
+    }
+    // Поллинг до 30 секунд
+    let attempts = 0
+    screenshotPollRef.current = setInterval(async () => {
+      attempts++
+      const result = await fetchScreenshot(deviceId)
+      if (result && result.capturedAt > before) {
+        clearInterval(screenshotPollRef.current!)
+        screenshotPollRef.current = null
+        setScreenshotData(result.image)
+        setScreenshotLoading(false)
+      } else if (attempts >= 15) {
+        clearInterval(screenshotPollRef.current!)
+        screenshotPollRef.current = null
+        setScreenshotLoading(false)
+        Alert.alert('Timeout', 'Скриншот не получен')
+        setScreenshotModal(false)
+      }
+    }, 2000)
+  }
 
   const addBonusTime = async (minutes: number) => {
     try {
@@ -215,6 +267,47 @@ export default function ControlScreen({ route }: Props) {
         />
       </View>
 
+      {/* Громкость */}
+      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Громкость</Text>
+      <View style={styles.cmdGrid}>
+        <CommandButton
+          label="Тише"
+          emoji="🔉"
+          color="#22d3ee"
+          onPress={() => void executeCommand('VOLUME_DOWN', 0)}
+        />
+        <CommandButton
+          label="Громче"
+          emoji="🔊"
+          color="#22d3ee"
+          onPress={() => void executeCommand('VOLUME_UP', 0)}
+        />
+        <CommandButton
+          label="Без звука"
+          emoji="🔇"
+          color="#888"
+          onPress={() => void executeCommand('VOLUME_MUTE', 0)}
+        />
+        <CommandButton
+          label="Скриншот"
+          emoji="📷"
+          color="#a78bfa"
+          onPress={() => void takeScreenshot()}
+        />
+      </View>
+
+      {/* Диски */}
+      {device?.status === 'online' && (device?.disks?.length ?? 0) > 0 && (
+        <>
+          <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Диски</Text>
+          <View style={styles.usersCard}>
+            {device.disks.map((d) => (
+              <DiskRow key={d.mount} disk={d} />
+            ))}
+          </View>
+        </>
+      )}
+
       {/* Пользователи */}
       {device?.status === 'online' && (device?.activeUsers?.length ?? 0) > 0 && (
         <>
@@ -263,6 +356,37 @@ export default function ControlScreen({ route }: Props) {
         <Text style={styles.scheduleBtnText}>Расписание работы</Text>
         <Text style={styles.scheduleArrow}>›</Text>
       </TouchableOpacity>
+
+      {/* Модалка скриншота */}
+      <Modal visible={screenshotModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { padding: 0, overflow: 'hidden' }]}>
+            {screenshotLoading ? (
+              <View style={{ padding: 32, alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontSize: 16 }}>Захват скриншота...</Text>
+              </View>
+            ) : screenshotData ? (
+              <Image
+                source={{ uri: `data:image/jpeg;base64,${screenshotData}` }}
+                style={{ width: '100%', aspectRatio: 16 / 9 }}
+                resizeMode="contain"
+              />
+            ) : null}
+            <TouchableOpacity
+              style={[styles.modalCancel, { margin: 12 }]}
+              onPress={() => {
+                if (screenshotPollRef.current) {
+                  clearInterval(screenshotPollRef.current)
+                  screenshotPollRef.current = null
+                }
+                setScreenshotModal(false)
+              }}
+            >
+              <Text style={{ color: '#888' }}>Закрыть</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Модалка задержки */}
       <Modal visible={delayModal} transparent animationType="fade">
@@ -452,4 +576,22 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   userStateText: { fontSize: 12, fontWeight: '600' },
+  diskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+    gap: 10,
+  },
+  diskMount: { color: '#fff', fontSize: 13, fontWeight: '600', width: 32 },
+  diskBarBg: {
+    flex: 1,
+    height: 6,
+    backgroundColor: '#333',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  diskBarFill: { height: '100%', borderRadius: 3 },
+  diskText: { color: '#666', fontSize: 12, width: 80, textAlign: 'right' },
 })

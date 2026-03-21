@@ -14,6 +14,7 @@ declare module 'fastify' {
   interface FastifyInstance {
     io: Server
     sendCommand: (deviceId: string, payload: unknown) => boolean
+    getDeviceScreenshot: (deviceId: string) => { image: string; capturedAt: string } | null
   }
 }
 
@@ -24,6 +25,8 @@ interface AgentSocket extends Socket {
     agentVersion: string
   }
 }
+
+const screenshotCache = new Map<string, { image: string; capturedAt: string }>()
 
 const socketPlugin: FastifyPluginAsync = fp(async (app) => {
   const io = new Server(app.server, {
@@ -82,7 +85,7 @@ const socketPlugin: FastifyPluginAsync = fp(async (app) => {
         return
       }
 
-      const { cpuPercent, ramPercent, uptime, activeUsers, agentVersion } =
+      const { cpuPercent, ramPercent, uptime, activeUsers, agentVersion, disks } =
         parsed.data
 
       await (app.prisma as PrismaClient).device.update({
@@ -95,6 +98,7 @@ const socketPlugin: FastifyPluginAsync = fp(async (app) => {
           uptime,
           activeUsers,
           agentVersion,
+          ...(disks !== undefined && { disks }),
         },
       })
     })
@@ -128,6 +132,17 @@ const socketPlugin: FastifyPluginAsync = fp(async (app) => {
       })
 
       app.log.info({ deviceId, commandId, success }, 'Command result received')
+    })
+
+    // Скриншот от агента — сохраняем в кэш
+    socket.on(WS_EVENTS.AGENT_SCREENSHOT, (raw: unknown) => {
+      const payload = raw as Record<string, unknown>
+      const image = payload['image'] as string | undefined
+      const capturedAt = payload['capturedAt'] as string | undefined
+      if (image && capturedAt) {
+        screenshotCache.set(deviceId, { image, capturedAt })
+        app.log.info({ deviceId }, 'Screenshot cached')
+      }
     })
 
     // Синхронизация локальных пользователей Windows
@@ -176,6 +191,7 @@ const socketPlugin: FastifyPluginAsync = fp(async (app) => {
     return true
   })
 
+  app.decorate('getDeviceScreenshot', (deviceId: string) => screenshotCache.get(deviceId) ?? null)
   app.decorate('io', io)
 
   // Задача: помечать устройства как "away" если heartbeat не приходил 2 минуты

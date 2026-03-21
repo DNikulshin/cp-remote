@@ -8,6 +8,7 @@
     pkgs.nodejs_24
     pkgs.openssl
     pkgs.docker-compose
+    pkgs.pnpm
  
   ];
   # Sets environment variables in the workspace

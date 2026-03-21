@@ -2,6 +2,8 @@
   "name": "pc-remote",
   "private": true,
   "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
     "dev:backend": "pnpm --filter backend dev",
     "dev:agent": "pnpm --filter agent dev",
     "build:shared": "pnpm --filter shared build",

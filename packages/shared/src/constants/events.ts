@@ -14,6 +14,9 @@ export const WS_EVENTS = {
     // Агент → Сервер (bind flow)
     AGENT_BIND_REQUEST: 'agent:bind:request',
     SERVER_BIND_SUCCESS: 'server:bind:success',
+
+    // Агент → Сервер (скриншот)
+    AGENT_SCREENSHOT: 'agent:screenshot',
   } as const
   
   export type WsEvent = (typeof WS_EVENTS)[keyof typeof WS_EVENTS]

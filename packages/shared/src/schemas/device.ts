@@ -14,6 +14,15 @@ export const ActiveUserSchema = z.object({
   logonTime: z.string(),
 })
 
+export const DiskInfoSchema = z.object({
+  mount: z.string(),
+  total: z.number().int(),
+  free: z.number().int(),
+  used: z.number().int(),
+})
+
+export type DiskInfo = z.infer<typeof DiskInfoSchema>
+
 export const HeartbeatPayloadSchema = z.object({
   deviceId: z.string().uuid(),
   timestamp: z.string().datetime(),
@@ -22,6 +31,7 @@ export const HeartbeatPayloadSchema = z.object({
   uptime: z.number().int().min(0), // секунды
   activeUsers: z.array(ActiveUserSchema),
   agentVersion: z.string(),
+  disks: z.array(DiskInfoSchema).optional(),
 })
 
 export type ActiveUser = z.infer<typeof ActiveUserSchema>

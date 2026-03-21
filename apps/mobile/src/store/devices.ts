@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 import { api } from '../api/client'
 
+export interface DiskInfo {
+  mount: string
+  total: number
+  free: number
+  used: number
+}
+
 export interface ActiveUser {
   name: string
   session: string   // 'console' | 'rdp' | 'unknown'
@@ -28,6 +35,7 @@ export interface Device {
   activeUsers: ActiveUser[]
   agentVersion: string | null
   timezone: string
+  disks: DiskInfo[]
 }
 
 interface DevicesState {
@@ -38,6 +46,7 @@ interface DevicesState {
   fetchDevices: () => Promise<void>
   fetchLocalUsers: (deviceId: string) => Promise<void>
   sendCommand: (deviceId: string, type: string, delaySeconds?: number) => Promise<{ delivered: boolean }>
+  fetchScreenshot: (deviceId: string) => Promise<{ image: string; capturedAt: string } | null>
   bindDevice: (deviceId: string, secret: string, name: string) => Promise<void>
   deleteDevice: (deviceId: string) => Promise<void>
 }
@@ -70,6 +79,15 @@ export const useDevicesStore = create<DevicesState>((set) => ({
   sendCommand: async (deviceId, type, delaySeconds = 0) => {
     const { data } = await api.post(`/devices/${deviceId}/commands`, { type, delaySeconds })
     return { delivered: data.delivered }
+  },
+
+  fetchScreenshot: async (deviceId) => {
+    try {
+      const { data } = await api.get<{ image: string; capturedAt: string }>(`/devices/${deviceId}/screenshot`)
+      return data
+    } catch {
+      return null
+    }
   },
 
   bindDevice: async (deviceId, secret, name) => {

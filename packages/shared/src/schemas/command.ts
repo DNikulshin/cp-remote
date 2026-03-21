@@ -5,6 +5,10 @@ export const CommandTypeSchema = z.enum([
   'REBOOT',
   'LOCK',
   'SLEEP',
+  'VOLUME_UP',
+  'VOLUME_DOWN',
+  'VOLUME_MUTE',
+  'SCREENSHOT',
 ])
 
 export type CommandType = z.infer<typeof CommandTypeSchema>

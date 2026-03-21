@@ -9,12 +9,20 @@ export interface ActiveUser {
   logonTime: string // '10:30 AM' или datetime
 }
 
+export interface DiskInfo {
+  mount: string
+  total: number
+  free: number
+  used: number
+}
+
 export interface SystemInfo {
   cpuPercent: number
   ramPercent: number
   uptime: number
   activeUsers: ActiveUser[]
   platform: string
+  disks: DiskInfo[]
 }
 
 // Служебные учётки Windows — исключаем по префиксу/паттерну
@@ -120,7 +128,7 @@ function parseQueryUserOutput(output: string): ActiveUser[] {
   return users
 }
 
-function getActiveUsers(): ActiveUser[] {
+export function getActiveUsers(): ActiveUser[] {
   try {
     if (process.platform === 'win32') {
       const output = execSync('query user 2>nul', { encoding: 'utf-8', windowsHide: true })
@@ -183,6 +191,39 @@ export function getLocalUsers(): LocalUser[] {
   }
 }
 
+function getDiskInfo(): DiskInfo[] {
+  try {
+    if (process.platform === 'win32') {
+      const output = execSync(
+        'powershell.exe -NonInteractive -NoProfile -Command "Get-PSDrive -PSProvider FileSystem | Select-Object @{N=\'Mount\';E={$_.Name+\':\'}},@{N=\'Total\';E={[long]($_.Free+$_.Used)}},@{N=\'Free\';E={[long]$_.Free}},@{N=\'Used\';E={[long]$_.Used}} | ConvertTo-Json -Compress"',
+        { encoding: 'utf-8', windowsHide: true }
+      )
+      const parsed: unknown = JSON.parse(output.trim())
+      const arr = Array.isArray(parsed) ? parsed : [parsed]
+      return arr
+        .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
+        .map((d) => ({
+          mount: String(d['Mount'] ?? ''),
+          total: Number(d['Total'] ?? 0),
+          free: Number(d['Free'] ?? 0),
+          used: Number(d['Used'] ?? 0),
+        }))
+        .filter((d) => d.mount && d.total > 0)
+    }
+    // Linux/Mac для разработки
+    const output = execSync('df -B1 / 2>/dev/null', { encoding: 'utf-8' })
+    const line = output.split('\n')[1] ?? ''
+    const parts = line.split(/\s+/)
+    const total = parseInt(parts[1] ?? '0')
+    const used = parseInt(parts[2] ?? '0')
+    const free = parseInt(parts[3] ?? '0')
+    if (!total) return []
+    return [{ mount: '/', total, used, free }]
+  } catch {
+    return []
+  }
+}
+
 export async function getSystemInfo(): Promise<SystemInfo> {
   const [cpuPercent] = await Promise.all([getCpuPercent()])
 
@@ -192,5 +233,6 @@ export async function getSystemInfo(): Promise<SystemInfo> {
     uptime: Math.floor(os.uptime()),
     activeUsers: getActiveUsers(),
     platform: process.platform,
+    disks: getDiskInfo(),
   }
 }

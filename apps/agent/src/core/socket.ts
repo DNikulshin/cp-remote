@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { log as logger } from '../utils/logger.js'
 import { config } from '../utils/config.js'
-import { setOnlineStatus } from '../local-server.js'
+import { setOnlineStatus, onScreenshotResult } from '../local-server.js'
 import { getSystemInfo, getLocalUsers } from '../utils/sysinfo.js'
 import { executeCommand } from '../handlers/index.js'
 import {
@@ -45,6 +45,14 @@ export async function connectToServer(tokenOverride?: string): Promise<void> {
     setOnlineStatus(true)
     startHeartbeat()
     sendLocalUsers()
+    onScreenshotResult((image) => {
+      socket?.emit(WS_EVENTS.AGENT_SCREENSHOT, {
+        deviceId: config.deviceId,
+        image,
+        capturedAt: new Date().toISOString(),
+      })
+      logger.debug('Screenshot sent to server')
+    })
   })
 
   socket.on('disconnect', (reason) => {

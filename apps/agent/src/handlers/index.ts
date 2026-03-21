@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process'
 import { log as logger } from '../utils/logger.js'
-import { setPendingLock } from '../local-server.js'
+import { setPendingLock, setPendingVolume, setPendingScreenshot } from '../local-server.js'
 import type { CommandPayload } from '@pc-remote/shared'
 
 export async function executeCommand(payload: CommandPayload): Promise<void> {
@@ -40,6 +40,30 @@ export async function executeCommand(payload: CommandPayload): Promise<void> {
 
     case 'SLEEP':
       execSync('rundll32.exe powrprof.dll,SetSuspendState 0,1,0', { windowsHide: true })
+      break
+
+    case 'VOLUME_UP':
+      if (delaySeconds > 0) {
+        setTimeout(() => setPendingVolume('UP'), delaySeconds * 1000)
+      } else {
+        setPendingVolume('UP')
+      }
+      break
+
+    case 'VOLUME_DOWN':
+      if (delaySeconds > 0) {
+        setTimeout(() => setPendingVolume('DOWN'), delaySeconds * 1000)
+      } else {
+        setPendingVolume('DOWN')
+      }
+      break
+
+    case 'VOLUME_MUTE':
+      setPendingVolume('MUTE')
+      break
+
+    case 'SCREENSHOT':
+      setPendingScreenshot()
       break
 
     default:

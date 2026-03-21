@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 import { FastifyInstance } from 'fastify'
 import crypto from 'node:crypto'
 import bcrypt from 'bcryptjs'
@@ -196,10 +196,16 @@ export class DevicesService {
     })
     if (!device) throw new DeviceError('Device not found', 404)
 
+    const data = {
+      ...input,
+      downtime: input.downtime !== undefined ? (input.downtime as Prisma.InputJsonValue) : Prisma.JsonNull,
+      dailyLimit: input.dailyLimit !== undefined ? (input.dailyLimit as Prisma.InputJsonValue) : Prisma.JsonNull,
+    }
+
     const schedule = await this.prisma.schedule.upsert({
       where: { deviceId },
-      create: { deviceId, ...input },
-      update: input,
+      create: { deviceId, ...data },
+      update: data,
     })
 
     // Отправляем обновление агенту через WebSocket

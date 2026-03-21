@@ -3,6 +3,17 @@ param([string]$ServerUrl = 'http://127.0.0.1:3535')
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public class AudioKeys {
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
+    public static void VolumeUp()   { keybd_event(0xAF, 0, 0, 0); keybd_event(0xAF, 0, 2, 0); }
+    public static void VolumeDown() { keybd_event(0xAE, 0, 0, 0); keybd_event(0xAE, 0, 2, 0); }
+    public static void VolumeMute() { keybd_event(0xAD, 0, 0, 0); keybd_event(0xAD, 0, 2, 0); }
+}
+'@
+
 # -- Строки интерфейса (unicode char codes — независимо от кодировки файла) --
 $s = @{
     Online            = [string]([char]0x25CF) + ' Online'
@@ -158,6 +169,33 @@ $timer.Add_Tick({
         if ($st.pendingLock) {
             try { Invoke-RestMethod -Uri "$ServerUrl/ack-lock" -Method POST -TimeoutSec 2 | Out-Null } catch {}
             rundll32.exe user32.dll,LockWorkStation
+        }
+
+        # Управление громкостью — сервис в session 0 не имеет доступа к аудио сессии пользователя
+        if ($st.pendingVolume) {
+            try { Invoke-RestMethod -Uri "$ServerUrl/ack-volume" -Method POST -TimeoutSec 2 | Out-Null } catch {}
+            switch ($st.pendingVolume) {
+                'UP'   { [AudioKeys]::VolumeUp() }
+                'DOWN' { [AudioKeys]::VolumeDown() }
+                'MUTE' { [AudioKeys]::VolumeMute() }
+            }
+        }
+
+        # Скриншот — сервис в session 0 не имеет доступа к рабочему столу пользователя
+        if ($st.pendingScreenshot) {
+            try {
+                Invoke-RestMethod -Uri "$ServerUrl/ack-screenshot" -Method POST -TimeoutSec 2 | Out-Null
+                $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+                $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+                $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+                $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+                $ms  = New-Object System.IO.MemoryStream
+                $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+                $b64  = [Convert]::ToBase64String($ms.ToArray())
+                $body = ConvertTo-Json @{ image = $b64 }
+                Invoke-RestMethod -Uri "$ServerUrl/screenshot-result" -Method POST -Body $body -ContentType 'application/json' -TimeoutSec 10 | Out-Null
+                $ms.Dispose(); $bmp.Dispose(); $gfx.Dispose()
+            } catch {}
         }
 
         if ($st.online) {

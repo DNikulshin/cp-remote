@@ -7,6 +7,10 @@ import QRCode from 'qrcode'
 const PORT = 3535
 let isOnline = false
 let pendingLock = false
+type VolumeAction = 'UP' | 'DOWN' | 'MUTE'
+let pendingVolume: VolumeAction | null = null
+let pendingScreenshot = false
+let screenshotResultCb: ((base64: string) => void) | null = null
 
 export function setOnlineStatus(online: boolean) {
   isOnline = online
@@ -15,6 +19,18 @@ export function setOnlineStatus(online: boolean) {
 // Запрашивает блокировку через трей (сервис в session 0 не может вызвать LockWorkStation напрямую)
 export function setPendingLock() {
   pendingLock = true
+}
+
+export function setPendingVolume(action: VolumeAction) {
+  pendingVolume = action
+}
+
+export function setPendingScreenshot() {
+  pendingScreenshot = true
+}
+
+export function onScreenshotResult(cb: (base64: string) => void) {
+  screenshotResultCb = cb
 }
 
 async function parseBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
@@ -45,6 +61,8 @@ export function startLocalServer() {
         deviceId: config.deviceId,
         bound: !!state.agentToken,
         pendingLock,
+        pendingVolume,
+        pendingScreenshot,
       }))
       return
     }
@@ -111,6 +129,33 @@ export function startLocalServer() {
     // POST /ack-lock — трей подтверждает что блокировка выполнена
     if (req.url === '/ack-lock') {
       pendingLock = false
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true }))
+      return
+    }
+
+    // POST /ack-volume — трей подтверждает что команда громкости принята
+    if (req.url === '/ack-volume') {
+      pendingVolume = null
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true }))
+      return
+    }
+
+    // POST /ack-screenshot — трей подтверждает начало захвата скриншота
+    if (req.url === '/ack-screenshot') {
+      pendingScreenshot = false
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true }))
+      return
+    }
+
+    // POST /screenshot-result — трей отправляет готовый скриншот (base64)
+    if (req.url === '/screenshot-result') {
+      const image = body['image'] as string | undefined
+      if (image && screenshotResultCb) {
+        screenshotResultCb(image)
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true }))
       return

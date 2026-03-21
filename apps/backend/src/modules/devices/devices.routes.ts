@@ -174,6 +174,21 @@ const devicesPrivateRoutes: FastifyPluginAsync = async (app) => {
     }
   )
 
+  app.get<{ Params: { id: string } }>('/:id/screenshot', async (request, reply) => {
+    const device = await app.prisma.device.findFirst({
+      where: { id: request.params.id, userId: request.user.userId },
+      select: { id: true },
+    })
+    if (!device) {
+      return reply.status(404).send({ error: 'Device not found' })
+    }
+    const screenshot = app.getDeviceScreenshot(request.params.id)
+    if (!screenshot) {
+      return reply.status(404).send({ error: 'No screenshot available' })
+    }
+    return reply.send(screenshot)
+  })
+
   app.post<{ Params: { id: string } }>('/:id/schedule/bonus', async (request, reply) => {
     const body = BonusTimeSchema.safeParse(request.body)
     if (!body.success) {
