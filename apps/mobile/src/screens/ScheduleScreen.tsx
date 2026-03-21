@@ -16,20 +16,20 @@ import { api } from '../api/client'
 
 type Props = NativeStackScreenProps<RootStackParams, 'Schedule'>
 
-interface TimeSlot {
-  start: string // HH:MM
-  end: string   // HH:MM
-}
-
+interface TimeSlot { start: string; end: string }
 type DaySlots = Record<string, TimeSlot[]>
+
+interface DowntimeConfig { enabled: boolean; start: string; end: string }
+interface DailyLimitConfig { enabled: boolean; minutesWeekday: number; minutesWeekend: number }
 
 interface DeviceSchedule {
   enabled: boolean
   timezone: string
   days: DaySlots
+  downtime?: DowntimeConfig
+  dailyLimit?: DailyLimitConfig
 }
 
-// Ключи совпадают с агентом: 0=вс, 1=пн, ..., 6=сб
 const DAYS = [
   { key: '1', label: 'Понедельник' },
   { key: '2', label: 'Вторник' },
@@ -43,10 +43,17 @@ const DAYS = [
 const TIME_RE = /^\d{2}:\d{2}$/
 
 function formatTime(raw: string): string {
-  // Auto-insert colon: "0900" → "09:00"
   const digits = raw.replace(/\D/g, '')
   if (digits.length <= 2) return digits
   return `${digits.slice(0, 2)}:${digits.slice(2, 4)}`
+}
+
+function minutesToLabel(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return `${m} мин`
+  if (m === 0) return `${h} ч`
+  return `${h} ч ${m} мин`
 }
 
 export default function ScheduleScreen({ route }: Props) {
@@ -54,30 +61,42 @@ export default function ScheduleScreen({ route }: Props) {
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [enabled, setEnabled] = useState(false)
-  const [timezone, setTimezone] = useState(
-    Intl.DateTimeFormat().resolvedOptions().timeZone
-  )
-  const [days, setDays] = useState<DaySlots>({})
-  // Форма добавления слота для каждого дня
-  const [addForm, setAddForm] = useState<
-    Record<string, { start: string; end: string } | undefined>
-  >({})
+  const [timezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone)
 
-  useEffect(() => {
-    void load()
-  }, [])
+  // Разрешённые часы
+  const [enabled, setEnabled] = useState(false)
+  const [days, setDays] = useState<DaySlots>({})
+  const [addForm, setAddForm] = useState<Record<string, { start: string; end: string } | undefined>>({})
+
+  // Комендантский час
+  const [downtimeEnabled, setDowntimeEnabled] = useState(false)
+  const [downtimeStart, setDowntimeStart] = useState('23:00')
+  const [downtimeEnd, setDowntimeEnd] = useState('07:00')
+
+  // Дневной лимит
+  const [limitEnabled, setLimitEnabled] = useState(false)
+  const [minutesWeekday, setMinutesWeekday] = useState('120')
+  const [minutesWeekend, setMinutesWeekend] = useState('240')
+
+  useEffect(() => { void load() }, [])
 
   async function load() {
     try {
-      const { data } = await api.get<{ schedule?: DeviceSchedule | null }>(
-        `/devices/${deviceId}`
-      )
+      const { data } = await api.get<{ schedule?: DeviceSchedule | null }>(`/devices/${deviceId}`)
       const s = data.schedule
       if (s) {
         setEnabled(s.enabled)
-        setTimezone(s.timezone)
         setDays(s.days ?? {})
+        if (s.downtime) {
+          setDowntimeEnabled(s.downtime.enabled)
+          setDowntimeStart(s.downtime.start)
+          setDowntimeEnd(s.downtime.end)
+        }
+        if (s.dailyLimit) {
+          setLimitEnabled(s.dailyLimit.enabled)
+          setMinutesWeekday(String(s.dailyLimit.minutesWeekday))
+          setMinutesWeekend(String(s.dailyLimit.minutesWeekend))
+        }
       }
     } catch {
       Alert.alert('Ошибка', 'Не удалось загрузить расписание')
@@ -86,52 +105,27 @@ export default function ScheduleScreen({ route }: Props) {
     }
   }
 
-  function openAddForm(key: string) {
-    setAddForm((prev) => ({ ...prev, [key]: { start: '09:00', end: '21:00' } }))
-  }
-
-  function cancelAddForm(key: string) {
-    setAddForm((prev) => {
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
-  }
-
-  function confirmAddSlot(key: string) {
-    const form = addForm[key]
-    if (!form) return
-
-    if (!TIME_RE.test(form.start) || !TIME_RE.test(form.end)) {
-      Alert.alert('Неверный формат', 'Введите время в формате ЧЧ:ММ')
-      return
-    }
-
-    const [sh = 0, sm = 0] = form.start.split(':').map(Number)
-    const [eh = 0, em = 0] = form.end.split(':').map(Number)
-    if (sh * 60 + sm >= eh * 60 + em) {
-      Alert.alert('Ошибка', 'Начало должно быть раньше окончания')
-      return
-    }
-
-    setDays((prev) => ({
-      ...prev,
-      [key]: [...(prev[key] ?? []), { start: form.start, end: form.end }],
-    }))
-    cancelAddForm(key)
-  }
-
-  function removeSlot(key: string, index: number) {
-    setDays((prev) => ({
-      ...prev,
-      [key]: (prev[key] ?? []).filter((_, i) => i !== index),
-    }))
-  }
-
   async function save() {
+    if (!TIME_RE.test(downtimeStart) || !TIME_RE.test(downtimeEnd)) {
+      Alert.alert('Ошибка', 'Неверный формат времени комендантского часа (ЧЧ:ММ)')
+      return
+    }
+    const wd = parseInt(minutesWeekday)
+    const we = parseInt(minutesWeekend)
+    if (isNaN(wd) || wd < 1 || isNaN(we) || we < 1) {
+      Alert.alert('Ошибка', 'Введите корректный лимит в минутах (минимум 1)')
+      return
+    }
+
     setSaving(true)
     try {
-      await api.put(`/devices/${deviceId}/schedule`, { enabled, timezone, days })
+      await api.put(`/devices/${deviceId}/schedule`, {
+        enabled,
+        timezone,
+        days,
+        downtime: { enabled: downtimeEnabled, start: downtimeStart, end: downtimeEnd },
+        dailyLimit: { enabled: limitEnabled, minutesWeekday: wd, minutesWeekend: we },
+      })
       Alert.alert('Сохранено', 'Расписание обновлено')
     } catch {
       Alert.alert('Ошибка', 'Не удалось сохранить расписание')
@@ -140,133 +134,173 @@ export default function ScheduleScreen({ route }: Props) {
     }
   }
 
+  // — Allowed hours helpers —
+  function openAddForm(key: string) {
+    setAddForm((prev) => ({ ...prev, [key]: { start: '09:00', end: '21:00' } }))
+  }
+  function cancelAddForm(key: string) {
+    setAddForm((prev) => { const next = { ...prev }; delete next[key]; return next })
+  }
+  function confirmAddSlot(key: string) {
+    const form = addForm[key]
+    if (!form) return
+    if (!TIME_RE.test(form.start) || !TIME_RE.test(form.end)) {
+      Alert.alert('Неверный формат', 'Введите время в формате ЧЧ:ММ'); return
+    }
+    const [sh = 0, sm = 0] = form.start.split(':').map(Number)
+    const [eh = 0, em = 0] = form.end.split(':').map(Number)
+    if (sh * 60 + sm >= eh * 60 + em) {
+      Alert.alert('Ошибка', 'Начало должно быть раньше окончания'); return
+    }
+    setDays((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), { start: form.start, end: form.end }] }))
+    cancelAddForm(key)
+  }
+  function removeSlot(key: string, index: number) {
+    setDays((prev) => ({ ...prev, [key]: (prev[key] ?? []).filter((_, i) => i !== index) }))
+  }
+
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#6c63ff" size="large" />
-      </View>
-    )
+    return <View style={styles.center}><ActivityIndicator color="#6c63ff" size="large" /></View>
   }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Включить / выключить */}
+
+      {/* ── 1. Комендантский час ── */}
+      <Text style={styles.sectionTitle}>Нерабочие часы</Text>
       <View style={styles.card}>
         <View style={styles.toggleRow}>
-          <View>
-            <Text style={styles.cardTitle}>Ограничение по времени</Text>
+          <View style={{ flex: 1, marginRight: 12 }}>
+            <Text style={styles.cardTitle}>Комендантский час</Text>
+            <Text style={styles.cardSub}>ПК полностью недоступен в этот период</Text>
+          </View>
+          <Switch value={downtimeEnabled} onValueChange={setDowntimeEnabled}
+            trackColor={{ false: '#333', true: '#6c63ff' }} thumbColor="#fff" />
+        </View>
+        {downtimeEnabled && (
+          <View style={styles.timeRow}>
+            <View style={styles.timeField}>
+              <Text style={styles.timeLabel}>С</Text>
+              <TextInput style={styles.timeInput} value={downtimeStart}
+                onChangeText={(v) => setDowntimeStart(formatTime(v))}
+                placeholder="23:00" placeholderTextColor="#555"
+                keyboardType="numbers-and-punctuation" maxLength={5} />
+            </View>
+            <Text style={styles.timeSep}>—</Text>
+            <View style={styles.timeField}>
+              <Text style={styles.timeLabel}>До</Text>
+              <TextInput style={styles.timeInput} value={downtimeEnd}
+                onChangeText={(v) => setDowntimeEnd(formatTime(v))}
+                placeholder="07:00" placeholderTextColor="#555"
+                keyboardType="numbers-and-punctuation" maxLength={5} />
+            </View>
+          </View>
+        )}
+      </View>
+
+      {/* ── 2. Дневной лимит ── */}
+      <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Дневной лимит</Text>
+      <View style={styles.card}>
+        <View style={styles.toggleRow}>
+          <View style={{ flex: 1, marginRight: 12 }}>
+            <Text style={styles.cardTitle}>Лимит экранного времени</Text>
             <Text style={styles.cardSub}>
-              {enabled
-                ? 'ПК доступен только в указанные часы'
-                : 'ПК доступен в любое время'}
+              {limitEnabled
+                ? `Будни: ${minutesToLabel(parseInt(minutesWeekday) || 0)} · Вых: ${minutesToLabel(parseInt(minutesWeekend) || 0)}`
+                : 'Время не ограничено'}
             </Text>
           </View>
-          <Switch
-            value={enabled}
-            onValueChange={setEnabled}
-            trackColor={{ false: '#333', true: '#6c63ff' }}
-            thumbColor="#fff"
-          />
+          <Switch value={limitEnabled} onValueChange={setLimitEnabled}
+            trackColor={{ false: '#333', true: '#6c63ff' }} thumbColor="#fff" />
+        </View>
+        {limitEnabled && (
+          <View style={{ marginTop: 12, gap: 10 }}>
+            <View style={styles.limitRow}>
+              <Text style={styles.limitLabel}>Будни (пн–пт)</Text>
+              <View style={styles.limitInputWrap}>
+                <TextInput style={styles.limitInput} value={minutesWeekday}
+                  onChangeText={setMinutesWeekday} keyboardType="number-pad"
+                  placeholder="120" placeholderTextColor="#555" />
+                <Text style={styles.limitUnit}>мин</Text>
+              </View>
+            </View>
+            <View style={styles.limitRow}>
+              <Text style={styles.limitLabel}>Выходные (сб–вс)</Text>
+              <View style={styles.limitInputWrap}>
+                <TextInput style={styles.limitInput} value={minutesWeekend}
+                  onChangeText={setMinutesWeekend} keyboardType="number-pad"
+                  placeholder="240" placeholderTextColor="#555" />
+                <Text style={styles.limitUnit}>мин</Text>
+              </View>
+            </View>
+          </View>
+        )}
+      </View>
+
+      {/* ── 3. Разрешённые часы ── */}
+      <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Разрешённые часы</Text>
+      <View style={styles.card}>
+        <View style={styles.toggleRow}>
+          <View style={{ flex: 1, marginRight: 12 }}>
+            <Text style={styles.cardTitle}>Ограничение по времени</Text>
+            <Text style={styles.cardSub}>
+              {enabled ? 'ПК доступен только в указанные часы' : 'ПК доступен в любое время'}
+            </Text>
+          </View>
+          <Switch value={enabled} onValueChange={setEnabled}
+            trackColor={{ false: '#333', true: '#6c63ff' }} thumbColor="#fff" />
         </View>
       </View>
 
-      {/* Дни недели */}
-      {enabled && (
-        <>
-          <Text style={styles.sectionTitle}>Разрешённые часы по дням</Text>
-
-          {DAYS.map(({ key, label }) => {
-            const slots = days[key] ?? []
-            const form = addForm[key]
-
-            return (
-              <View key={key} style={styles.card}>
-                <Text style={styles.dayLabel}>{label}</Text>
-
-                {slots.length === 0 && !form && (
-                  <Text style={styles.noSlots}>День заблокирован</Text>
-                )}
-
-                {slots.map((slot, i) => (
-                  <View key={i} style={styles.slotRow}>
-                    <Text style={styles.slotTime}>
-                      {slot.start} — {slot.end}
-                    </Text>
-                    <TouchableOpacity
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      onPress={() => removeSlot(key, i)}
-                    >
-                      <Text style={styles.removeBtn}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-
-                {form ? (
-                  <View style={styles.addForm}>
-                    <TextInput
-                      style={styles.timeInput}
-                      value={form.start}
-                      onChangeText={(v) =>
-                        setAddForm((prev) => ({
-                          ...prev,
-                          [key]: { start: formatTime(v), end: prev[key]?.end ?? '21:00' },
-                        }))
-                      }
-                      placeholder="09:00"
-                      placeholderTextColor="#555"
-                      keyboardType="numbers-and-punctuation"
-                      maxLength={5}
-                    />
-                    <Text style={styles.timeSep}>—</Text>
-                    <TextInput
-                      style={styles.timeInput}
-                      value={form.end}
-                      onChangeText={(v) =>
-                        setAddForm((prev) => ({
-                          ...prev,
-                          [key]: { start: prev[key]?.start ?? '09:00', end: formatTime(v) },
-                        }))
-                      }
-                      placeholder="21:00"
-                      placeholderTextColor="#555"
-                      keyboardType="numbers-and-punctuation"
-                      maxLength={5}
-                    />
-                    <TouchableOpacity
-                      style={styles.confirmBtn}
-                      onPress={() => confirmAddSlot(key)}
-                    >
-                      <Text style={styles.confirmBtnText}>✓</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      onPress={() => cancelAddForm(key)}
-                    >
-                      <Text style={styles.removeBtn}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.addBtn}
-                    onPress={() => openAddForm(key)}
-                  >
-                    <Text style={styles.addBtnText}>+ Добавить интервал</Text>
-                  </TouchableOpacity>
-                )}
+      {enabled && DAYS.map(({ key, label }) => {
+        const slots = days[key] ?? []
+        const form = addForm[key]
+        return (
+          <View key={key} style={styles.card}>
+            <Text style={styles.dayLabel}>{label}</Text>
+            {slots.length === 0 && !form && (
+              <Text style={styles.noSlots}>День заблокирован</Text>
+            )}
+            {slots.map((slot, i) => (
+              <View key={i} style={styles.slotRow}>
+                <Text style={styles.slotTime}>{slot.start} — {slot.end}</Text>
+                <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  onPress={() => removeSlot(key, i)}>
+                  <Text style={styles.removeBtn}>✕</Text>
+                </TouchableOpacity>
               </View>
-            )
-          })}
-        </>
-      )}
+            ))}
+            {form ? (
+              <View style={styles.addForm}>
+                <TextInput style={styles.timeInputSlot} value={form.start}
+                  onChangeText={(v) => setAddForm((prev) => ({ ...prev, [key]: { start: formatTime(v), end: prev[key]?.end ?? '21:00' } }))}
+                  placeholder="09:00" placeholderTextColor="#555"
+                  keyboardType="numbers-and-punctuation" maxLength={5} />
+                <Text style={styles.timeSep}>—</Text>
+                <TextInput style={styles.timeInputSlot} value={form.end}
+                  onChangeText={(v) => setAddForm((prev) => ({ ...prev, [key]: { start: prev[key]?.start ?? '09:00', end: formatTime(v) } }))}
+                  placeholder="21:00" placeholderTextColor="#555"
+                  keyboardType="numbers-and-punctuation" maxLength={5} />
+                <TouchableOpacity style={styles.confirmBtn} onPress={() => confirmAddSlot(key)}>
+                  <Text style={styles.confirmBtnText}>✓</Text>
+                </TouchableOpacity>
+                <TouchableOpacity hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  onPress={() => cancelAddForm(key)}>
+                  <Text style={styles.removeBtn}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.addBtn} onPress={() => openAddForm(key)}>
+                <Text style={styles.addBtnText}>+ Добавить интервал</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )
+      })}
 
-      <TouchableOpacity
-        style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
-        onPress={() => void save()}
-        disabled={saving}
-      >
-        <Text style={styles.saveBtnText}>
-          {saving ? 'Сохранение...' : 'Сохранить'}
-        </Text>
+      <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+        onPress={() => void save()} disabled={saving}>
+        <Text style={styles.saveBtnText}>{saving ? 'Сохранение...' : 'Сохранить'}</Text>
       </TouchableOpacity>
     </ScrollView>
   )
@@ -276,84 +310,62 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f23' },
   content: { padding: 16, paddingBottom: 40 },
   center: { flex: 1, backgroundColor: '#0f0f23', justifyContent: 'center', alignItems: 'center' },
-
+  sectionTitle: {
+    color: '#888', fontSize: 12, fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8,
+  },
   card: {
-    backgroundColor: '#1a1a2e',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#333',
+    backgroundColor: '#1a1a2e', borderRadius: 16, padding: 16,
+    marginBottom: 12, borderWidth: 1, borderColor: '#333',
   },
-  toggleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  cardTitle: { color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardTitle: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 4 },
   cardSub: { color: '#888', fontSize: 13 },
 
-  sectionTitle: {
-    color: '#888',
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 8,
-    marginTop: 4,
+  // Время комендантского часа
+  timeRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 8 },
+  timeField: { flex: 1, gap: 4 },
+  timeLabel: { color: '#888', fontSize: 12 },
+  timeInput: {
+    backgroundColor: '#0f0f23', borderRadius: 8, padding: 10,
+    color: '#fff', fontSize: 16, borderWidth: 1, borderColor: '#444', textAlign: 'center',
   },
+  timeSep: { color: '#888', fontSize: 18, marginTop: 18 },
 
+  // Лимит
+  limitRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  limitLabel: { color: '#ccc', fontSize: 14, flex: 1 },
+  limitInputWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  limitInput: {
+    backgroundColor: '#0f0f23', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8,
+    color: '#fff', fontSize: 15, borderWidth: 1, borderColor: '#444',
+    width: 70, textAlign: 'center',
+  },
+  limitUnit: { color: '#888', fontSize: 13 },
+
+  // Дни и слоты
   dayLabel: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 10 },
   noSlots: { color: '#555', fontSize: 13, marginBottom: 8 },
-
   slotRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#0f0f23',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 6,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#0f0f23', borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6,
   },
   slotTime: { color: '#6c63ff', fontSize: 15, fontWeight: '500' },
   removeBtn: { color: '#ef4444', fontSize: 16 },
-
-  addForm: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
+  addForm: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  timeInputSlot: {
+    flex: 1, backgroundColor: '#0f0f23', borderRadius: 8, padding: 8,
+    color: '#fff', fontSize: 15, borderWidth: 1, borderColor: '#444', textAlign: 'center',
   },
-  timeInput: {
-    flex: 1,
-    backgroundColor: '#0f0f23',
-    borderRadius: 8,
-    padding: 8,
-    color: '#fff',
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: '#444',
-    textAlign: 'center',
-  },
-  timeSep: { color: '#888', fontSize: 14 },
-  confirmBtn: {
-    backgroundColor: '#6c63ff',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
+  confirmBtn: { backgroundColor: '#6c63ff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   confirmBtnText: { color: '#fff', fontSize: 16 },
-
   addBtn: { marginTop: 4 },
   addBtnText: { color: '#6c63ff', fontSize: 14 },
 
   saveBtn: {
-    backgroundColor: '#6c63ff',
-    borderRadius: 14,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
+    backgroundColor: '#6c63ff', borderRadius: 14,
+    padding: 16, alignItems: 'center', marginTop: 8,
   },
   saveBtnDisabled: { opacity: 0.6 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },

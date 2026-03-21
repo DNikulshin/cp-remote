@@ -14,6 +14,7 @@ import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { useDevicesStore } from '../store/devices'
 import type { ActiveUser, LocalUser } from '../store/devices'
+import { api } from '../api/client'
 import type { RootStackParams } from '../navigation'
 
 type Props = NativeStackScreenProps<RootStackParams, 'Control'>
@@ -99,6 +100,15 @@ export default function ControlScreen({ route }: Props) {
   const [delayModal, setDelayModal] = useState(false)
   const [pendingCommand, setPendingCommand] = useState<string | null>(null)
   const [delaySeconds, setDelaySeconds] = useState('0')
+
+  const addBonusTime = async (minutes: number) => {
+    try {
+      await api.post(`/devices/${deviceId}/schedule/bonus`, { minutes })
+      Alert.alert('✓ Бонус добавлен', `+${minutes} мин к дневному лимиту`)
+    } catch {
+      Alert.alert('Ошибка', 'Не удалось добавить время')
+    }
+  }
 
   const executeCommand = async (type: string, delay = 0) => {
     try {
@@ -229,10 +239,24 @@ export default function ControlScreen({ route }: Props) {
         </>
       )}
 
-      {/* Расписание */}
-      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Настройки</Text>
+      {/* Бонусное время */}
+      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Расписание</Text>
+      <View style={styles.bonusRow}>
+        {[15, 30, 60].map((min) => (
+          <TouchableOpacity
+            key={min}
+            style={styles.bonusBtn}
+            onPress={() => void addBonusTime(min)}
+          >
+            <Text style={styles.bonusEmoji}>⏱</Text>
+            <Text style={styles.bonusLabel}>+{min} мин</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Настройки расписания */}
       <TouchableOpacity
-        style={styles.scheduleBtn}
+        style={[styles.scheduleBtn, { marginTop: 8 }]}
         onPress={() => navigation.navigate('Schedule', { deviceId, deviceName })}
       >
         <Text style={styles.scheduleEmoji}>🕐</Text>
@@ -370,6 +394,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#6c63ff',
   },
+  bonusRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  bonusBtn: {
+    flex: 1,
+    backgroundColor: '#1a1a2e',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#6c63ff44',
+  },
+  bonusEmoji: { fontSize: 18, marginBottom: 4 },
+  bonusLabel: { color: '#6c63ff', fontSize: 13, fontWeight: '600' },
   scheduleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
