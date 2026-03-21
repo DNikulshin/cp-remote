@@ -6,6 +6,7 @@ import {
   WS_EVENTS,
   HeartbeatPayloadSchema,
   CommandResultSchema,
+  LocalUsersPayloadSchema,
 } from '@pc-remote/shared'
 
 // Расширяем FastifyInstance
@@ -127,6 +128,31 @@ const socketPlugin: FastifyPluginAsync = fp(async (app) => {
       })
 
       app.log.info({ deviceId, commandId, success }, 'Command result received')
+    })
+
+    // Синхронизация локальных пользователей Windows
+    socket.on(WS_EVENTS.AGENT_LOCAL_USERS, async (raw: unknown) => {
+      const parsed = LocalUsersPayloadSchema.safeParse(raw)
+      if (!parsed.success) {
+        app.log.warn({ deviceId }, 'Invalid local users payload')
+        return
+      }
+
+      const { users } = parsed.data
+
+      await (app.prisma as PrismaClient).$transaction([
+        (app.prisma as PrismaClient).deviceUser.deleteMany({ where: { deviceId } }),
+        (app.prisma as PrismaClient).deviceUser.createMany({
+          data: users.map((u) => ({
+            deviceId,
+            name: u.name,
+            fullName: u.fullName,
+            enabled: u.enabled,
+          })),
+        }),
+      ])
+
+      app.log.info({ deviceId, count: users.length }, 'Local users synced')
     })
 
     // Агент отключился
