@@ -1,0 +1,36 @@
+{
+  "name": "agent",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "bundle": "node esbuild.config.mjs",
+    "package:win": "pkg dist-win/agent.cjs --target node18-win-x64 --output dist-win/agent.exe --no-bytecode --public"
+  },
+  "dependencies": {
+    "@pc-remote/shared": "workspace:*",
+    "axios": "^1.7.2",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "socket.io-client": "^4.7.5",
+    "winston": "^3.13.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.14.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/qrcode-terminal": "^0.12.2",
+    "@yao-pkg/pkg": "^5.12.0",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.15.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.0"
+  }
+}

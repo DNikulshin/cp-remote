@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Env files (contain secrets)
+.env
+.env.*
+!.env.example
+
+# Agent runtime files
+apps/agent/.agent-config.json
+apps/agent/logs/
+
+# Prisma generated
+apps/backend/node_modules/.prisma/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+
+# npm lockfile (monorepo uses pnpm)
+package-lock.json

@@ -1,0 +1,14 @@
+{
+  "name": "pc-remote",
+  "private": true,
+  "scripts": {
+    "dev:backend": "pnpm --filter backend dev",
+    "dev:agent": "pnpm --filter agent dev",
+    "build:shared": "pnpm --filter shared build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5",
+    "typescript": "^5.4.0"
+  }
+}

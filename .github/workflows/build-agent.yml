@@ -1,0 +1,87 @@
+name: Build Windows Agent Installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/agent/**'
+      - 'packages/shared/**'
+      - '.github/workflows/build-agent.yml'
+      - 'installer/**'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test agent
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared
+        run: pnpm --filter @pc-remote/shared build
+
+      - name: Run agent tests
+        run: pnpm --filter agent test
+
+  build:
+    name: Build Windows Agent Installer
+    needs: test
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared
+        run: pnpm --filter @pc-remote/shared build
+
+      - name: Bundle agent with esbuild
+        run: pnpm --filter agent bundle
+
+      - name: Package agent with pkg
+        run: pnpm --filter agent package:win
+
+      - name: Download WinSW
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path installer/winsw
+          Invoke-WebRequest `
+            -Uri "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe" `
+            -OutFile "installer/winsw/winsw.exe"
+
+      - name: Build installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: installer/installer.iss
+          options: /O+
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pc-remote-agent-setup
+          path: installer/output/pc-remote-agent-setup.exe
+          retention-days: 30

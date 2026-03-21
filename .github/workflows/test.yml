@@ -1,0 +1,142 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Unit-тесты агента (без БД) ─────────────────────────────────────────────
+  agent-unit:
+    name: Agent unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared
+        run: pnpm --filter @pc-remote/shared build
+
+      - name: Typecheck agent
+        run: pnpm --filter agent typecheck
+
+      - name: Run agent unit tests
+        run: pnpm --filter agent test
+
+  # ── Интеграционные тесты бэкенда (с PostgreSQL) ───────────────────────────
+  backend-integration:
+    name: Backend integration tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pcremote
+          POSTGRES_PASSWORD: pcremote
+          POSTGRES_DB: pc_remote_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://pcremote:pcremote@localhost:5432/pc_remote_test
+      JWT_SECRET: test-jwt-secret-min-32-chars-long-x
+      JWT_REFRESH_SECRET: test-refresh-secret-min-32-chars-xx
+      NODE_ENV: test
+      LOG_LEVEL: warn
+      PORT: 3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared
+        run: pnpm --filter @pc-remote/shared build
+
+      - name: Typecheck backend
+        run: pnpm --filter backend typecheck
+
+      - name: Build backend
+        run: pnpm --filter backend build
+
+      - name: Apply DB schema
+        working-directory: apps/backend
+        run: pnpm db:push
+
+      - name: Start backend and wait for readiness
+        run: |
+          node apps/backend/dist/app.js &
+          echo $! > /tmp/backend.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+              echo "Backend ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -f http://localhost:3000/health || (echo "Backend failed to start" && exit 1)
+
+      - name: Run backend integration tests
+        run: pnpm --filter backend test
+
+      - name: Stop backend
+        if: always()
+        run: kill $(cat /tmp/backend.pid) 2>/dev/null || true
+
+  # ── Тесты мобильного приложения ───────────────────────────────────────────
+  mobile-unit:
+    name: Mobile unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared
+        run: pnpm --filter @pc-remote/shared build
+
+      - name: Typecheck mobile
+        run: pnpm --filter mobile typecheck
+
+      - name: Run mobile unit tests
+        run: pnpm --filter mobile test -- --coverage=false --passWithNoTests

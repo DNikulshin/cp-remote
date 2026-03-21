@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String         @id @default(uuid())
+  email        String         @unique
+  passwordHash String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  devices      Device[]
+  refreshTokens RefreshToken[]
+
+  @@index([email])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([token])
+  @@index([userId])
+}
+
+model Device {
+  id           String    @id @default(uuid())
+  userId       String?   // null = устройство ещё не привязано
+  user         User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name         String
+  secret       String
+  agentToken   String?   @unique
+
+  platform     String    @default("windows")
+  agentVersion String?
+  timezone     String    @default("UTC")
+
+  status       String    @default("offline")
+  lastSeenAt   DateTime?
+  cpuPercent   Float?
+  ramPercent   Float?
+  uptime       Int?
+  activeUsers  Json     @default("[]")
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  schedule     Schedule?
+  overrides    Override[]
+  commands     Command[]
+  auditLogs    AuditLog[]
+
+  @@index([userId])
+  @@index([agentToken])
+}
+
+model Schedule {
+  id        String   @id @default(uuid())
+  deviceId  String   @unique
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  enabled   Boolean  @default(false)
+  timezone  String   @default("UTC")
+  // Хранится как JSON: { "1": [{start:"09:00", end:"21:00"}], "2": [...] }
+  days      Json     @default("{}")
+
+  updatedAt DateTime @updatedAt
+}
+
+model Override {
+  id       String   @id @default(uuid())
+  deviceId String
+  device   Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  date     String   // "YYYY-MM-DD"
+  slots    Json     // [{start, end}]
+  reason   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([deviceId, date])
+}
+
+model Command {
+  id         String    @id @default(uuid())
+  deviceId   String
+  device     Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  type       String    // SHUTDOWN | REBOOT | LOCK | SLEEP
+  payload    Json      // { delaySeconds, message }
+  status     String    @default("pending") // pending | sent | executed | failed
+  
+  sentAt     DateTime?
+  executedAt DateTime?
+  error      String?
+
+  createdAt  DateTime  @default(now())
+
+  @@index([deviceId, status])
+  @@index([deviceId, createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  event     String   // command_sent | schedule_changed | device_locked | login_blocked
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([deviceId, createdAt])
+}
