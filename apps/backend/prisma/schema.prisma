@@ -60,9 +60,26 @@ model Device {
   overrides    Override[]
   commands     Command[]
   auditLogs    AuditLog[]
+  localUsers   DeviceUser[]
 
   @@index([userId])
   @@index([agentToken])
+}
+
+model DeviceUser {
+  id        String   @id @default(uuid())
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  name      String
+  fullName  String   @default("")
+  enabled   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([deviceId, name])
+  @@index([deviceId])
 }
 
 model Schedule {
