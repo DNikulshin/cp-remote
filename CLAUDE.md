@@ -106,7 +106,7 @@ npx expo start   # локальная сеть
 | `JWT_REFRESH_SECRET` | Секрет для refresh token | другая случайная строка |
 | `NODE_ENV` | Окружение | `development` / `production` |
 | `LOG_LEVEL` | Уровень логирования | `debug` / `info` |
-| `PORT` | Порт сервера (Railway подставляет автоматически) | `3000` |
+| `PORT` | Порт сервера (Render подставляет автоматически) | `3000` |
 
 ### Agent (`apps/agent/.env`)
 
@@ -142,14 +142,16 @@ Password: Test1234
 
 ## Деплой
 
-### Railway (backend)
+### Render (backend)
 
-1. Создать проект на railway.app
+1. Создать Web Service на render.com
 2. Добавить PostgreSQL сервис — `DATABASE_URL` подставится автоматически
 3. Добавить env vars: `JWT_SECRET`, `JWT_REFRESH_SECRET`, `NODE_ENV=production`
-4. Railway использует `Dockerfile` из корня репозитория
+4. Render использует `Dockerfile` из корня репозитория
 
 URL продакшн бекенда: `https://pc-remote-backend.onrender.com`
+
+> `keep-alive.yml` пингует `/health` каждые 10 минут — Render free tier засыпает без активности.
 
 ### GitHub Actions
 
@@ -194,7 +196,7 @@ URL продакшн бекенда: `https://pc-remote-backend.onrender.com`
 
 ### Mobile
 
-- Использует `npm install` (не pnpm) — EAS local build требует npm lockfile
+- EAS local build определяет pnpm workspace (через корневой `pnpm-workspace.yaml`) и использует pnpm
 - `expo-camera` для QR-сканирования (не expo-barcode-scanner — он удалён как deprecated)
 - Динамический URL бекенда через `SecureStore` — меняется в Settings экране
 
