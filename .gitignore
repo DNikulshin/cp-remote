@@ -19,6 +19,9 @@ apps/agent/dist-win/
 installer/output/
 installer/winsw/
 
+# APK builder
+Dockerfile.apk
+
 # Prisma generated
 apps/backend/node_modules/.prisma/
 
