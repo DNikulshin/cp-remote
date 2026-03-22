@@ -82,6 +82,10 @@ jobs:
       - name: Build shared
         run: pnpm --filter @pc-remote/shared build
 
+      - name: Generate Prisma client
+        working-directory: apps/backend
+        run: pnpm prisma generate
+
       - name: Typecheck backend
         run: pnpm --filter backend typecheck
 
