@@ -39,5 +39,8 @@ Thumbs.db
 # IDE
 .vscode/
 
+# Claude Code local settings (per-user, not shared)
+.claude/settings.local.json
+
 # npm lockfile (monorepo uses pnpm)
 package-lock.json
