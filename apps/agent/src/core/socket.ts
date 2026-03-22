@@ -168,6 +168,7 @@ function startHeartbeat() {
         uptime: sysInfo.uptime,
         activeUsers: sysInfo.activeUsers,
         agentVersion: '0.0.1',
+        disks: sysInfo.disks,
       })
 
       socket.emit(WS_EVENTS.AGENT_HEARTBEAT, payload)

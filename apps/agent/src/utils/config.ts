@@ -30,6 +30,7 @@ interface AgentConfig {
   secret?: string   // хранится до привязки, затем удаляется
   timezone: string
   passwordHash?: string
+  localToken?: string  // shared secret для связи агент ↔ трей
 }
 
 // Загружаем или создаём конфиг агента
@@ -43,10 +44,11 @@ function loadOrCreateAgentConfig(): AgentConfig {
     // файл повреждён — создаём новый
   }
 
-  // Первый запуск — генерируем deviceId
+  // Первый запуск — генерируем deviceId и localToken
   const config: AgentConfig = {
     deviceId: crypto.randomUUID(),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    localToken: crypto.randomBytes(32).toString('hex'),
   }
 
   // Создаём директорию если не существует
@@ -104,6 +106,7 @@ export const config = {
   secret: agentConfig.secret,
   timezone: agentConfig.timezone,
   passwordHash: agentConfig.passwordHash,
+  localToken: agentConfig.localToken,
 } as const
 
 // Изменяемое состояние — обновляется при сохранении
@@ -111,4 +114,5 @@ export const state = {
   secret: agentConfig.secret as string | undefined,
   agentToken: agentConfig.agentToken as string | undefined,
   passwordHash: agentConfig.passwordHash as string | undefined,
+  localToken: agentConfig.localToken as string | undefined,
 }

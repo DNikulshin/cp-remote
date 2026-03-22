@@ -33,6 +33,11 @@ export function onScreenshotResult(cb: (base64: string) => void) {
   screenshotResultCb = cb
 }
 
+function checkLocalToken(req: http.IncomingMessage): boolean {
+  const token = req.headers['x-local-token']
+  return typeof token === 'string' && token === state.localToken
+}
+
 async function parseBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
     let data = ''
@@ -101,7 +106,7 @@ export function startLocalServer() {
 
     const body = await parseBody(req)
 
-    // POST /verify-password
+    // POST /verify-password — без токена (трей вызывает его первым для аутентификации)
     if (req.url === '/verify-password') {
       const password = body['password'] as string | undefined
       if (!password || !state.passwordHash) {
@@ -114,6 +119,9 @@ export function startLocalServer() {
       res.end(JSON.stringify({ valid }))
       return
     }
+
+    // Все остальные POST-эндпоинты требуют X-Local-Token
+    if (!checkLocalToken(req)) { res.writeHead(403); res.end(); return }
 
     // POST /change-password
     if (req.url === '/change-password') {
@@ -161,8 +169,12 @@ export function startLocalServer() {
       return
     }
 
-    // POST /reset — сброс привязки, WinSW перезапустит агент
+    // POST /reset — сброс привязки, требует пароль в теле
     if (req.url === '/reset') {
+      const password = body['password'] as string | undefined
+      if (!password || !state.passwordHash) { res.writeHead(401); res.end(); return }
+      const valid = await bcrypt.compare(password, state.passwordHash)
+      if (!valid) { res.writeHead(403); res.end(); return }
       resetAgentConfig()
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true }))

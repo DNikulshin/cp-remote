@@ -102,8 +102,29 @@ function Ask-Password {
     } catch { return $false }
 }
 
+# Читаем localToken из config.json агента (ProgramData в production, cwd в dev)
+function Get-LocalToken {
+    $paths = @(
+        "$env:ProgramData\pc-remote-agent\config.json",
+        "$PSScriptRoot\.agent-config.json"
+    )
+    foreach ($p in $paths) {
+        if (Test-Path $p) {
+            try {
+                $cfg = Get-Content $p -Raw | ConvertFrom-Json
+                if ($cfg.localToken) { return $cfg.localToken }
+            } catch {}
+        }
+    }
+    return $null
+}
+
+$script:localToken = Get-LocalToken
+
 function Invoke-Post([string]$Path) {
-    Invoke-RestMethod -Uri "$ServerUrl$Path" -Method POST -TimeoutSec 3 | Out-Null
+    $headers = @{}
+    if ($script:localToken) { $headers['X-Local-Token'] = $script:localToken }
+    Invoke-RestMethod -Uri "$ServerUrl$Path" -Method POST -Headers $headers -TimeoutSec 3 | Out-Null
 }
 
 # ---- Events ----
@@ -113,7 +134,9 @@ $itemQR.Add_Click({
 })
 
 $itemReset.Add_Click({
-    if (-not (Ask-Password)) { Show-Balloon $s.WrongPass; return }
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $pass = [Microsoft.VisualBasic.Interaction]::InputBox($s.EnterPass, 'PC Remote', '')
+    if (-not $pass) { return }
     $ans = [System.Windows.Forms.MessageBox]::Show(
         $s.ResetConfirm,
         'PC Remote',
@@ -121,7 +144,9 @@ $itemReset.Add_Click({
         [System.Windows.Forms.MessageBoxIcon]::Warning)
     if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) {
         try {
-            Invoke-Post '/reset'
+            $body = ConvertTo-Json @{ password = $pass }
+            $hdrs = @{ 'X-Local-Token' = $script:localToken; 'Content-Type' = 'application/json' }
+            Invoke-RestMethod -Uri "$ServerUrl/reset" -Method POST -Body $body -Headers $hdrs -TimeoutSec 3 | Out-Null
             Show-Balloon $s.ResetDone
             Start-Sleep 3
             Start-Process "$ServerUrl/qr"
@@ -136,8 +161,9 @@ $itemChangePass.Add_Click({
     if (-not $new) { return }
     try {
         $body = ConvertTo-Json @{ password = $new }
+        $hdrs = @{ 'X-Local-Token' = $script:localToken; 'Content-Type' = 'application/json' }
         Invoke-RestMethod -Uri "$ServerUrl/change-password" `
-            -Method POST -Body $body -ContentType 'application/json' -TimeoutSec 3 | Out-Null
+            -Method POST -Body $body -Headers $hdrs -TimeoutSec 3 | Out-Null
         Show-Balloon $s.PassChanged
     } catch { Show-Balloon $s.PassChangeErr }
 })
@@ -166,14 +192,16 @@ $timer.Add_Tick({
 
         # Блокировка экрана — сервис не может вызвать LockWorkStation из session 0,
         # поэтому делегирует трею через pendingLock
+        $th = @{ 'X-Local-Token' = $script:localToken }
+
         if ($st.pendingLock) {
-            try { Invoke-RestMethod -Uri "$ServerUrl/ack-lock" -Method POST -TimeoutSec 2 | Out-Null } catch {}
+            try { Invoke-RestMethod -Uri "$ServerUrl/ack-lock" -Method POST -Headers $th -TimeoutSec 2 | Out-Null } catch {}
             rundll32.exe user32.dll,LockWorkStation
         }
 
         # Управление громкостью — сервис в session 0 не имеет доступа к аудио сессии пользователя
         if ($st.pendingVolume) {
-            try { Invoke-RestMethod -Uri "$ServerUrl/ack-volume" -Method POST -TimeoutSec 2 | Out-Null } catch {}
+            try { Invoke-RestMethod -Uri "$ServerUrl/ack-volume" -Method POST -Headers $th -TimeoutSec 2 | Out-Null } catch {}
             switch ($st.pendingVolume) {
                 'UP'   { [AudioKeys]::VolumeUp() }
                 'DOWN' { [AudioKeys]::VolumeDown() }
@@ -182,9 +210,9 @@ $timer.Add_Tick({
         }
 
         # Скриншот — сервис в session 0 не имеет доступа к рабочему столу пользователя
+        # ACK отправляем только ПОСЛЕ успешного захвата, чтобы не потерять скриншот при сбое
         if ($st.pendingScreenshot) {
             try {
-                Invoke-RestMethod -Uri "$ServerUrl/ack-screenshot" -Method POST -TimeoutSec 2 | Out-Null
                 $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
                 $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
                 $gfx = [System.Drawing.Graphics]::FromImage($bmp)
@@ -192,9 +220,12 @@ $timer.Add_Tick({
                 $ms  = New-Object System.IO.MemoryStream
                 $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
                 $b64  = [Convert]::ToBase64String($ms.ToArray())
-                $body = ConvertTo-Json @{ image = $b64 }
-                Invoke-RestMethod -Uri "$ServerUrl/screenshot-result" -Method POST -Body $body -ContentType 'application/json' -TimeoutSec 10 | Out-Null
                 $ms.Dispose(); $bmp.Dispose(); $gfx.Dispose()
+                # Сначала сбрасываем флаг, потом отправляем результат
+                Invoke-RestMethod -Uri "$ServerUrl/ack-screenshot" -Method POST -Headers $th -TimeoutSec 2 | Out-Null
+                $body = ConvertTo-Json @{ image = $b64 }
+                $thJson = @{ 'X-Local-Token' = $script:localToken; 'Content-Type' = 'application/json' }
+                Invoke-RestMethod -Uri "$ServerUrl/screenshot-result" -Method POST -Body $body -Headers $thJson -TimeoutSec 10 | Out-Null
             } catch {}
         }
 
